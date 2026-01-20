@@ -191,7 +191,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/nsfwaction <warn|mute> - Set NSFW moderation policy (Admin only)\n"
         "/info - Get information about a user (Reply or current user)\n"
         "/promote - Promote a user to Admin (Reply, Admin only)\n"
-        "/demote - Demote an Admin to member (Reply, Admin only)"
+        "/demote - Demote an Admin to member (Reply, Admin only)\n"
+        "/pin - Pin a message (Reply, Admin only)"
     )
     await context.bot.send_message(chat_id=update.effective_chat.id, text=help_text)
 
@@ -627,6 +628,22 @@ async def free_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Failed to free user: {e}")
 
+async def pin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.reply_to_message:
+        await update.message.reply_text("Reply to the message you want to pin.")
+        return
+    chat_id = update.effective_chat.id
+    admins = await context.bot.get_chat_administrators(chat_id)
+    admin_ids = [admin.user.id for admin in admins]
+    if update.effective_user.id not in admin_ids:
+        await update.message.reply_text("You need to be an admin to use this command.")
+        return
+    try:
+        await context.bot.pin_chat_message(chat_id=chat_id, message_id=update.message.reply_to_message.message_id)
+        await update.message.reply_text("Pinned the message.")
+    except Exception as e:
+        await update.message.reply_text(f"Failed to pin message: {e}")
+
 if __name__ == '__main__':
     # Get token from environment variable
     token = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -650,6 +667,7 @@ if __name__ == '__main__':
     info_handler = CommandHandler('info', user_info)
     promote_handler = CommandHandler('promote', promote_user)
     demote_handler = CommandHandler('demote', demote_user)
+    pin_handler = CommandHandler('pin', pin_message)
     
     # Message handlers
     # Track users middleware (group=-1 ensures it runs before others)
@@ -674,9 +692,24 @@ if __name__ == '__main__':
     application.add_handler(info_handler)
     application.add_handler(promote_handler)
     application.add_handler(demote_handler)
+    application.add_handler(pin_handler)
     application.add_handler(welcome_handler)
     application.add_handler(moderation_handler)
     application.add_handler(chat_handler)
 
     print("Bot is running...")
-    application.run_polling()
+    base_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("WEBHOOK_BASE_URL")
+    port = int(os.getenv("PORT", "8080"))
+    path = os.getenv("WEBHOOK_PATH", f"/webhook/{token}")
+    if base_url:
+        webhook_url = f"{base_url}{path}"
+        print(f"Starting webhook server on 0.0.0.0:{port} -> {webhook_url}")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path=path.lstrip("/"),
+            webhook_url=webhook_url,
+        )
+    else:
+        print("Starting polling...")
+        application.run_polling()
